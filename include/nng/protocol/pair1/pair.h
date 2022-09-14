@@ -28,6 +28,7 @@ NNG_DECL int nng_pair1_open_poly(nng_socket *);
 #endif
 
 #define NNG_OPT_PAIR1_POLY "pair1:polyamorous"
+#define NNG_OPT_PAIR1_HEADER_SIZE "pair1:header-size"
 #define NNG_PAIR1_SELF 0x11
 #define NNG_PAIR1_PEER 0x11
 #define NNG_PAIR1_SELF_NAME "pair1"
