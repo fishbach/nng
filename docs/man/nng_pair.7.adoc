@@ -115,6 +115,13 @@ xref:nng_options.5.adoc#NNG_OPT_MAXTTL[`NNG_OPT_MAXTTL`]::
    Formerly it was used to configure _polyamorous_ mode, but that mode
    is now established by using the `nng_pair1_open_poly()` function.
 
+((`NNG_OPT_PAIR1_HEADER_SIZE`))::
+
+   (`int`, version 1 with polyamorous mode only)  When this option is
+   set to a value > 0, the configured amount of bytes of the message
+   header will be transferred over the pair.
+   This disables any TTL checks and hop counting.
+
 === Protocol Headers
 
 Version 0 of the pair protocol has no protocol-specific headers.

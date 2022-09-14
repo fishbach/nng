@@ -43,6 +43,7 @@ struct pair1poly_sock {
 	nni_msgq *     urq;
 	nni_sock *     sock;
 	nni_atomic_int ttl;
+	int            header_size;
 	nni_mtx        mtx;
 	nni_id_map     pipes;
 	nni_list       plist;
@@ -173,6 +174,7 @@ pair1poly_sock_init(void *arg, nni_sock *sock)
 	s->urq = nni_sock_recvq(sock);
 	nni_atomic_init(&s->ttl);
 	nni_atomic_set(&s->ttl, 8);
+	s->header_size = 0;
 }
 
 static void
@@ -285,9 +287,7 @@ pair1poly_pipe_recv_cb(void *arg)
 	pair1poly_pipe *p = arg;
 	pair1poly_sock *s = p->pair;
 	nni_msg *       msg;
-	uint32_t        hdr;
 	nni_pipe *      pipe = p->pipe;
-	size_t          len;
 
 	if (nni_aio_result(&p->aio_recv) != 0) {
 		nni_pipe_close(p->pipe);
@@ -300,32 +300,48 @@ pair1poly_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// If the message is missing the hop count header, scrap it.
-	if ((nni_msg_len(msg) < sizeof(uint32_t)) ||
-	    ((hdr = nni_msg_trim_u32(msg)) > 0xff)) {
-		BUMP_STAT(&s->stat_rx_malformed);
-		nni_msg_free(msg);
-		nni_pipe_close(pipe);
-		return;
+	if (s->header_size > 0) {
+
+		// Does the message have enough data?
+		if (nni_msg_len(msg) < (size_t)s->header_size) {
+			BUMP_STAT(&s->stat_rx_malformed);
+			nni_msg_free(msg);
+			nni_pipe_close(pipe);
+			return;
+		}
+
+		nni_msg_header_append(msg, nni_msg_body(msg), s->header_size);
+		nni_msg_trim(msg, s->header_size);
+
+	} else {
+
+		// If the message is missing the hop count header, scrap it.
+		uint32_t hdr;
+		if ((nni_msg_len(msg) < sizeof(uint32_t)) ||
+			((hdr = nni_msg_trim_u32(msg)) > 0xff)) {
+			BUMP_STAT(&s->stat_rx_malformed);
+			nni_msg_free(msg);
+			nni_pipe_close(pipe);
+			return;
+		}
+
+		// If we bounced too many times, discard the message, but
+		// keep getting more.
+		if ((int) hdr > nni_atomic_get(&s->ttl)) {
+			BUMP_STAT(&s->stat_ttl_drop);
+			nni_msg_free(msg);
+			nni_pipe_recv(pipe, &p->aio_recv);
+			return;
+		}
+
+		// Store the hop count in the header.
+		nni_msg_header_append_u32(msg, hdr);
+
 	}
-
-	len = nni_msg_len(msg);
-
-	// If we bounced too many times, discard the message, but
-	// keep getting more.
-	if ((int) hdr > nni_atomic_get(&s->ttl)) {
-		BUMP_STAT(&s->stat_ttl_drop);
-		nni_msg_free(msg);
-		nni_pipe_recv(pipe, &p->aio_recv);
-		return;
-	}
-
-	// Store the hop count in the header.
-	nni_msg_header_append_u32(msg, hdr);
 
 	// Send the message up.
 	nni_aio_set_msg(&p->aio_put, msg);
-	nni_sock_bump_rx(s->sock, len);
+	nni_sock_bump_rx(s->sock, nni_msg_len(msg));
 	nni_msgq_aio_put(s->urq, &p->aio_put);
 }
 
@@ -396,13 +412,18 @@ pair1poly_pipe_get_cb(void *arg)
 	msg = nni_aio_get_msg(&p->aio_get);
 	nni_aio_set_msg(&p->aio_get, NULL);
 
-	// Cooked mode messages have no header, so we have to add one.
-	// Strip off any previously existing header, such as when
-	// replying to a message.
-	nni_msg_header_clear(msg);
+	// No header overwrite for custom header.
+	if (p->pair->header_size == 0) {
 
-	// Insert the hop count header.
-	nni_msg_header_append_u32(msg, 1);
+		// Cooked mode messages have no header, so we have to add one.
+		// Strip off any previously existing header, such as when
+		// replying to a message.
+		nni_msg_header_clear(msg);
+
+		// Insert the hop count header.
+		nni_msg_header_append_u32(msg, 1);
+
+	}
 
 	nni_aio_set_msg(&p->aio_send, msg);
 	nni_pipe_send(p->pipe, &p->aio_send);
@@ -464,6 +485,20 @@ pair1poly_get_poly(void *arg, void *buf, size_t *szp, nni_opt_type t)
 	return (nni_copyout_bool(true, buf, szp, t));
 }
 
+static int
+pair1poly_set_header_size(void *arg, const void *buf, size_t sz, nni_opt_type t)
+{
+	pair1poly_sock *s = arg;
+	return (nni_copyin_int(&s->header_size, buf, sz, 0, NNI_MAX_HEADER_SIZE, t));
+}
+
+static int
+pair1poly_get_header_size(void *arg, void *buf, size_t *szp, nni_opt_type t)
+{
+	pair1poly_sock *s = arg;
+	return (nni_copyout_int(s->header_size, buf, szp, t));
+}
+
 static void
 pair1poly_sock_send(void *arg, nni_aio *aio)
 {
@@ -499,6 +534,11 @@ static nni_option pair1poly_sock_options[] = {
 	{
 	    .o_name = NNG_OPT_PAIR1_POLY,
 	    .o_get  = pair1poly_get_poly,
+	},
+	{
+	    .o_name = NNG_OPT_PAIR1_HEADER_SIZE,
+	    .o_get  = pair1poly_get_header_size,
+	    .o_set  = pair1poly_set_header_size,
 	},
 	// terminate list
 	{
