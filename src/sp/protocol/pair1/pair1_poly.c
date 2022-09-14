@@ -300,28 +300,31 @@ pair1poly_pipe_recv_cb(void *arg)
 	// Store the pipe ID.
 	nni_msg_set_pipe(msg, nni_pipe_id(p->pipe));
 
-	// If the message is missing the hop count header, scrap it.
-	if ((nni_msg_len(msg) < sizeof(uint32_t)) ||
-	    ((hdr = nni_msg_trim_u32(msg)) > 0xff)) {
-		BUMP_STAT(&s->stat_rx_malformed);
-		nni_msg_free(msg);
-		nni_pipe_close(pipe);
-		return;
-	}
-
 	len = nni_msg_len(msg);
 
-	// If we bounced too many times, discard the message, but
-	// keep getting more.
-	if ((int) hdr > nni_atomic_get(&s->ttl)) {
-		BUMP_STAT(&s->stat_ttl_drop);
-		nni_msg_free(msg);
-		nni_pipe_recv(pipe, &p->aio_recv);
-		return;
-	}
+	// handle TTL
+	if (nni_atomic_get(&s->ttl) > 0) {
+		// If the message is missing the hop count header, scrap it.
+		if ((len < sizeof(uint32_t)) ||
+		    ((hdr = nni_msg_trim_u32(msg)) > 0xff)) {
+			BUMP_STAT(&s->stat_rx_malformed);
+			nni_msg_free(msg);
+			nni_pipe_close(pipe);
+			return;
+		}
 
-	// Store the hop count in the header.
-	nni_msg_header_append_u32(msg, hdr);
+		// If we bounced too many times, discard the message, but
+		// keep getting more.
+		if ((int) hdr > nni_atomic_get(&s->ttl)) {
+			BUMP_STAT(&s->stat_ttl_drop);
+			nni_msg_free(msg);
+			nni_pipe_recv(pipe, &p->aio_recv);
+			return;
+		}
+
+		// Store the hop count in the header.
+		nni_msg_header_append_u32(msg, hdr);
+	}
 
 	// Send the message up.
 	nni_aio_set_msg(&p->aio_put, msg);
@@ -401,8 +404,10 @@ pair1poly_pipe_get_cb(void *arg)
 	// replying to a message.
 	nni_msg_header_clear(msg);
 
-	// Insert the hop count header.
-	nni_msg_header_append_u32(msg, 1);
+	if (nni_atomic_get(&p->pair->ttl) > 0) {
+		// Insert the hop count header.
+		nni_msg_header_append_u32(msg, 1);
+	}
 
 	nni_aio_set_msg(&p->aio_send, msg);
 	nni_pipe_send(p->pipe, &p->aio_send);
@@ -443,7 +448,7 @@ pair1poly_set_max_ttl(void *arg, const void *buf, size_t sz, nni_opt_type t)
 	int             rv;
 	int             ttl;
 
-	if ((rv = nni_copyin_int(&ttl, buf, sz, 1, NNI_MAX_MAX_TTL, t)) == 0) {
+	if ((rv = nni_copyin_int(&ttl, buf, sz, 0, NNI_MAX_MAX_TTL, t)) == 0) {
 		nni_atomic_set(&s->ttl, ttl);
 	}
 

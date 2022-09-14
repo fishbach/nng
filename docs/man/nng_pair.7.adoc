@@ -107,7 +107,8 @@ The following protocol-specific options are available.
 
 xref:nng_options.5.adoc#NNG_OPT_MAXTTL[`NNG_OPT_MAXTTL`]::
 
-   (`int`, version 1 only).  Maximum time-to-live.
+   (`int`, version 1 only)  Maximum time-to-live.
+   Can be set to 0 for both sockets of the pair to disable the TTL mechanism.
 
 ((`NNG_OPT_PAIR1_POLY`))::
 
