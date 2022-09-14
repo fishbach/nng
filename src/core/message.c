@@ -24,11 +24,13 @@ typedef struct {
 
 // Underlying message structure.
 struct nng_msg {
-	uint32_t       m_header_buf[(NNI_MAX_MAX_TTL + 1)];
-	size_t         m_header_len;
-	nni_chunk      m_body;
-	uint32_t       m_pipe; // set on receive
-	nni_atomic_int m_refcnt;
+	uint32_t        m_header_buf[(NNI_MAX_MAX_TTL + 1)];
+	size_t          m_header_len;
+	nni_chunk       m_body;
+	uint32_t        m_pipe; // set on receive
+	uint32_t       *m_send_pipes;
+	int             m_send_pipe_count;
+	nni_atomic_int  m_refcnt;
 };
 
 #if 0
@@ -300,6 +302,12 @@ nni_chunk_trim_u32(nni_chunk *ch)
 	return (v);
 }
 
+size_t
+nni_msg_send_pipes_size(const nni_msg *msg)
+{
+	return (sizeof(uint32_t) * msg->m_send_pipe_count);
+}
+
 void
 nni_msg_clone(nni_msg *m)
 {
@@ -424,6 +432,13 @@ nni_msg_dup(nni_msg **dup, const nni_msg *src)
 	}
 
 	m->m_pipe = src->m_pipe;
+	if (src->m_send_pipe_count > 0) {
+		if ((m->m_send_pipes = nni_alloc(nni_msg_send_pipes_size(src))) == NULL) {
+			return (NNG_ENOMEM);
+		}
+		memcpy(m->m_send_pipes, src->m_send_pipes, nni_msg_send_pipes_size(src));
+		m->m_send_pipe_count = src->m_send_pipe_count;
+	}
 	nni_atomic_init(&m->m_refcnt);
 	nni_atomic_set(&m->m_refcnt, 1);
 
@@ -436,6 +451,9 @@ nni_msg_free(nni_msg *m)
 {
 	if ((m != NULL) && (nni_atomic_dec_nv(&m->m_refcnt) == 0)) {
 		nni_chunk_free(&m->m_body);
+		if (m->m_send_pipe_count > 0) {
+			nni_free(m->m_send_pipes, nni_msg_send_pipes_size(m));
+		}
 		NNI_FREE_STRUCT(m);
 	}
 }
