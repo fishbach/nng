@@ -661,7 +661,7 @@ NNG_DECL void     nng_msg_clear(nng_msg *);
 NNG_DECL void     nng_msg_header_clear(nng_msg *);
 NNG_DECL void     nng_msg_set_pipe(nng_msg *, nng_pipe);
 NNG_DECL nng_pipe nng_msg_get_pipe(const nng_msg *);
-NNG_DECL int      nng_msg_set_pipes(nng_msg *, const nng_pipe *, int);
+NNG_DECL int      nng_msg_set_send_pipes(nng_msg *, const nng_pipe *, int);
 
 // Pipe API. Generally pipes are only "observable" to applications, but
 // we do permit an application to close a pipe. This can be useful, for

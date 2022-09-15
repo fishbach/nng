@@ -1826,7 +1826,7 @@ nng_msg_set_pipe(nng_msg *msg, nng_pipe p)
 }
 
 int
-nng_msg_set_pipes(nng_msg *msg, const nng_pipe *pipes, int count)
+nng_msg_set_send_pipes(nng_msg *msg, const nng_pipe *pipes, int count)
 {
 	uint32_t *ids = NULL;
 	if (count > 0) {
