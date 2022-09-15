@@ -303,9 +303,18 @@ nni_chunk_trim_u32(nni_chunk *ch)
 }
 
 size_t
-nni_msg_send_pipes_size(const nni_msg *msg)
+nni_msg_send_pipes_size(int count)
 {
-	return (sizeof(uint32_t) * msg->m_send_pipe_count);
+	return (sizeof(uint32_t) * count);
+}
+
+static void
+nni_msg_send_pipes_free(nni_msg *m)
+{
+	if (m->m_send_pipe_count > 0) {
+		nni_free(m->m_send_pipes,
+		    nni_msg_send_pipes_size(m->m_send_pipe_count));
+	}
 }
 
 void
@@ -365,6 +374,7 @@ nni_msg_pull_up(nni_msg *m)
 		memcpy(dst, nni_msg_header(m), len);
 		dst += len;
 		memcpy(dst, nni_msg_body(m), nni_msg_len(m));
+		// no copy for send pipes (makes no sense here)
 		nni_msg_free(m);
 		return (m2);
 	}
@@ -433,10 +443,12 @@ nni_msg_dup(nni_msg **dup, const nni_msg *src)
 
 	m->m_pipe = src->m_pipe;
 	if (src->m_send_pipe_count > 0) {
-		if ((m->m_send_pipes = nni_alloc(nni_msg_send_pipes_size(src))) == NULL) {
+		if ((m->m_send_pipes = nni_alloc(nni_msg_send_pipes_size(
+		         src->m_send_pipe_count))) == NULL) {
 			return (NNG_ENOMEM);
 		}
-		memcpy(m->m_send_pipes, src->m_send_pipes, nni_msg_send_pipes_size(src));
+		memcpy(m->m_send_pipes, src->m_send_pipes,
+		    nni_msg_send_pipes_size(src->m_send_pipe_count));
 		m->m_send_pipe_count = src->m_send_pipe_count;
 	}
 	nni_atomic_init(&m->m_refcnt);
@@ -451,9 +463,7 @@ nni_msg_free(nni_msg *m)
 {
 	if ((m != NULL) && (nni_atomic_dec_nv(&m->m_refcnt) == 0)) {
 		nni_chunk_free(&m->m_body);
-		if (m->m_send_pipe_count > 0) {
-			nni_free(m->m_send_pipes, nni_msg_send_pipes_size(m));
-		}
+		nni_msg_send_pipes_free(m);
 		NNI_FREE_STRUCT(m);
 	}
 }
@@ -645,6 +655,14 @@ void
 nni_msg_set_pipe(nni_msg *m, uint32_t pid)
 {
 	m->m_pipe = pid;
+}
+
+void
+nni_msg_set_pipes(nni_msg *m, uint32_t *pipes, int count)
+{
+	nni_msg_send_pipes_free(m);
+	m->m_send_pipes      = pipes;
+	m->m_send_pipe_count = count;
 }
 
 uint32_t
